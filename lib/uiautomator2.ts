@@ -35,6 +35,13 @@ const REQUIRED_OPTIONS: RequiredKeysOf<UiAutomator2ServerOptions>[] = [
   'disableWindowAnimation',
 ] as const;
 
+const sleepSync = (ms) => {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+        // 空循环，阻塞主线程
+    }
+};
+
 class UIA2Proxy extends JWProxy {
   public didInstrumentationExit: boolean = false;
 
@@ -151,9 +158,36 @@ export class UiAutomator2Server {
   }
 
   async startSession(caps: StringRecord): Promise<void> {
-    await this.cleanupAutomationLeftovers();
+    // await this.cleanupAutomationLeftovers();
+    /// change code↓↓↓↓↓↓↓↓↓↓↓↓↓
+    this.log.info(`[MAX workaround] Skiping this.cleanupAutomationLeftovers()`)
+    if (await this.adb.processExists(exports.SERVER_PACKAGE_ID)) {
+        this.log.info(`[MAX workaround] ${exports.SERVER_PACKAGE_ID} is running. Stopping it.`);
+        await this.adb.forceStop(exports.SERVER_PACKAGE_ID);
+    } else {
+        this.log.info(`[MAX workaround] ${exports.SERVER_PACKAGE_ID} is not running.`);
+    }
+    if (await this.adb.processExists(exports.SERVER_TEST_PACKAGE_ID)) {
+        this.log.info(`${exports.SERVER_TEST_PACKAGE_ID} is running. Stopping it.`);
+        await this.adb.forceStop(exports.SERVER_TEST_PACKAGE_ID);
+    } else {
+        this.log.info(`${exports.SERVER_TEST_PACKAGE_ID} is not running.`);
+    }
     if (caps.skipServerInstallation) {
-      this.log.info(`'skipServerInstallation' is set. Attempting to use UIAutomator2 server from the device`);
+        this.log.info(`'skipServerInstallation' is set. Attempting to use UIAutomator2 server from the device`);
+        let pmOutput;
+        try {
+            pmOutput = await this.adb.shell(['pm', 'list', 'instrumentation']);
+            if (!pmOutput.includes(exports.SERVER_TEST_PACKAGE_ID)) {
+                this.log.info(`[MAX workaround] '${exports.INSTRUMENTATION_TARGET}' is not available on the device. Installing server APKs`);
+                await this.installServerApk();
+            } else {
+                this.log.info(`[MAX workaround] '${exports.INSTRUMENTATION_TARGET}' is available on the device.`);
+            }
+        } catch (err) {
+            this.log.error(`[MAX workaround] Failed to verify or install UIAutomator2 server: ${err.message}, skipping server startup`);
+        }
+    /// change code↑↑↑↑↑↑↑↑↑↑↑↑↑↑
     } else {
       this.log.info(`Starting UIAutomator2 server ${serverVersion}`);
       this.log.info(`Using UIAutomator2 server from '${apkPath}' and test from '${testApkPath}'`);
@@ -171,6 +205,7 @@ export class UiAutomator2Server {
         await this.stopInstrumentationProcess();
       } catch {}
       await this.startInstrumentationProcess();
+      sleepSync(2000);
       if (!this.jwproxy.didInstrumentationExit) {
         try {
           await waitForCondition(
