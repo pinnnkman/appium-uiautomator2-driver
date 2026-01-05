@@ -35,13 +35,6 @@ const REQUIRED_OPTIONS: RequiredKeysOf<UiAutomator2ServerOptions>[] = [
   'disableWindowAnimation',
 ] as const;
 
-const sleepSync = (ms) => {
-    const end = Date.now() + ms;
-    while (Date.now() < end) {
-        // 空循环，阻塞主线程
-    }
-};
-
 class UIA2Proxy extends JWProxy {
   public didInstrumentationExit: boolean = false;
 
@@ -158,8 +151,8 @@ export class UiAutomator2Server {
   }
 
   async startSession(caps: StringRecord): Promise<void> {
+    /// [MAX workaround]  ↓↓↓↓↓↓↓↓↓↓↓↓↓
     // await this.cleanupAutomationLeftovers();
-    /// change code↓↓↓↓↓↓↓↓↓↓↓↓↓
     this.log.info(`[MAX workaround] Skiping this.cleanupAutomationLeftovers()`)
     if (await this.adb.processExists(exports.SERVER_PACKAGE_ID)) {
         this.log.info(`[MAX workaround] ${exports.SERVER_PACKAGE_ID} is running. Stopping it.`);
@@ -187,7 +180,7 @@ export class UiAutomator2Server {
         } catch (err) {
             this.log.error(`[MAX workaround] Failed to verify or install UIAutomator2 server: ${err.message}, skipping server startup`);
         }
-    /// change code↑↑↑↑↑↑↑↑↑↑↑↑↑↑
+    /// [MAX workaround]  ↑↑↑↑↑↑↑↑↑↑↑↑↑↑
     } else {
       this.log.info(`Starting UIAutomator2 server ${serverVersion}`);
       this.log.info(`Using UIAutomator2 server from '${apkPath}' and test from '${testApkPath}'`);
@@ -205,7 +198,21 @@ export class UiAutomator2Server {
         await this.stopInstrumentationProcess();
       } catch {}
       await this.startInstrumentationProcess();
-      sleepSync(2000);
+      /// [MAX workaround]  ↓↓↓↓↓↓↓↓↓↓↓↓↓
+      try {
+          this.log.info(`[MAX workaround] Waiting up to ${SERVER_LAUNCH_TIMEOUT_MS}ms for port 6790 to become available...`);
+          await (0, asyncbox_1.waitForCondition)(async () => {
+              const output = await this.adb.shell(['netstat', '-an']); // Check active network connections
+              return output.includes(':6790'); // Look for port 6790 in the output
+          }, {
+              waitMs: SERVER_LAUNCH_TIMEOUT_MS,
+              intervalMs: 1000,
+          });
+          this.log.info(`Port 6790 is now available.`);
+      } catch (err) {
+          throw this.log.errorWithException(`Failed to detect port 6790 availability within ${SERVER_LAUNCH_TIMEOUT_MS}ms: ${err.message}`);
+      }
+      /// [MAX workaround]  ↑↑↑↑↑↑↑↑↑↑↑↑↑↑
       if (!this.jwproxy.didInstrumentationExit) {
         try {
           await waitForCondition(
