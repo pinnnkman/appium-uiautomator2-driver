@@ -151,9 +151,36 @@ export class UiAutomator2Server {
   }
 
   async startSession(caps: StringRecord): Promise<void> {
-    await this.cleanupAutomationLeftovers();
+    /// [MAX workaround]  ↓↓↓↓↓↓↓↓↓↓↓↓↓
+    // await this.cleanupAutomationLeftovers();
+    this.log.info(`[MAX workaround] Skiping this.cleanupAutomationLeftovers()`)
+    if (await this.adb.processExists(exports.SERVER_PACKAGE_ID)) {
+        this.log.info(`[MAX workaround] ${exports.SERVER_PACKAGE_ID} is running. Stopping it.`);
+        await this.adb.forceStop(exports.SERVER_PACKAGE_ID);
+    } else {
+        this.log.info(`[MAX workaround] ${exports.SERVER_PACKAGE_ID} is not running.`);
+    }
+    if (await this.adb.processExists(exports.SERVER_TEST_PACKAGE_ID)) {
+        this.log.info(`${exports.SERVER_TEST_PACKAGE_ID} is running. Stopping it.`);
+        await this.adb.forceStop(exports.SERVER_TEST_PACKAGE_ID);
+    } else {
+        this.log.info(`${exports.SERVER_TEST_PACKAGE_ID} is not running.`);
+    }
     if (caps.skipServerInstallation) {
-      this.log.info(`'skipServerInstallation' is set. Attempting to use UIAutomator2 server from the device`);
+        this.log.info(`'skipServerInstallation' is set. Attempting to use UIAutomator2 server from the device`);
+        let pmOutput;
+        try {
+            pmOutput = await this.adb.shell(['pm', 'list', 'instrumentation']);
+            if (!pmOutput.includes(exports.SERVER_TEST_PACKAGE_ID)) {
+                this.log.info(`[MAX workaround] '${exports.INSTRUMENTATION_TARGET}' is not available on the device. Installing server APKs`);
+                await this.installServerApk();
+            } else {
+                this.log.info(`[MAX workaround] '${exports.INSTRUMENTATION_TARGET}' is available on the device.`);
+            }
+        } catch (err) {
+            this.log.error(`[MAX workaround] Failed to verify or install UIAutomator2 server: ${err.message}, skipping server startup`);
+        }
+    /// [MAX workaround]  ↑↑↑↑↑↑↑↑↑↑↑↑↑↑
     } else {
       this.log.info(`Starting UIAutomator2 server ${serverVersion}`);
       this.log.info(`Using UIAutomator2 server from '${apkPath}' and test from '${testApkPath}'`);
@@ -171,6 +198,21 @@ export class UiAutomator2Server {
         await this.stopInstrumentationProcess();
       } catch {}
       await this.startInstrumentationProcess();
+      /// [MAX workaround]  ↓↓↓↓↓↓↓↓↓↓↓↓↓
+      try {
+          this.log.info(`[MAX workaround] Waiting up to ${SERVER_LAUNCH_TIMEOUT_MS}ms for port 6790 to become available...`);
+          await (0, asyncbox_1.waitForCondition)(async () => {
+              const output = await this.adb.shell(['netstat', '-an']); // Check active network connections
+              return output.includes(':6790'); // Look for port 6790 in the output
+          }, {
+              waitMs: SERVER_LAUNCH_TIMEOUT_MS,
+              intervalMs: 1000,
+          });
+          this.log.info(`Port 6790 is now available.`);
+      } catch (err) {
+          throw this.log.errorWithException(`Failed to detect port 6790 availability within ${SERVER_LAUNCH_TIMEOUT_MS}ms: ${err.message}`);
+      }
+      /// [MAX workaround]  ↑↑↑↑↑↑↑↑↑↑↑↑↑↑
       if (!this.jwproxy.didInstrumentationExit) {
         try {
           await waitForCondition(
